@@ -64,23 +64,30 @@ void run(int argc, char** argv)
         // Запускаем кернел, с указанием размера рабочего пространства и передачей всех аргументов
         // Если хотите - можете удалить ветвление здесь и оставить только тот код который соответствует вашему выбору API
         if (context.type() == gpu::Context::TypeOpenCL) {
-            // TODO
-            throw std::runtime_error(CODE_IS_NOT_IMPLEMENTED);
-            // ocl_fill_with_zeros.exec();
-            // ocl_sum_reduction.exec();
-            // ocl_prefix_accumulation.exec();
-        } else if (context.type() == gpu::Context::TypeCUDA) {
-            // TODO
-            throw std::runtime_error(CODE_IS_NOT_IMPLEMENTED);
-            // cuda::fill_buffer_with_zeros();
-            // cuda::prefix_sum_01_sum_reduction();
-            // cuda::prefix_sum_02_prefix_accumulation();
-        } else if (context.type() == gpu::Context::TypeVulkan) {
-            // TODO
-            throw std::runtime_error(CODE_IS_NOT_IMPLEMENTED);
-            // vk_fill_with_zeros.exec();
-            // vk_sum_reduction.exec();
-            // vk_prefix_accumulation.exec();
+            unsigned int k = 2;
+            gpu::gpu_mem_32u* from = &input_gpu;
+            gpu::gpu_mem_32u* to   = &buffer1_pow2_sum_gpu;
+            ocl_fill_with_zeros.exec(
+            gpu::WorkSize(GROUP_SIZE, n),
+            prefix_sum_accum_gpu,n);
+            while (true) {
+                ocl_prefix_accumulation.exec(
+                    gpu::WorkSize(GROUP_SIZE, n/2),
+                    *from,prefix_sum_accum_gpu,n, k);
+                if (k>n) {break;}
+                ocl_sum_reduction.exec(
+                    gpu::WorkSize(GROUP_SIZE, n/k),
+                    *from, *to,n/(k/2));
+                k*=2;
+                if (to == &buffer1_pow2_sum_gpu) {
+                    to   = &buffer2_pow2_sum_gpu;
+                    from = &buffer1_pow2_sum_gpu;
+                } else {
+                    to   = &buffer1_pow2_sum_gpu;
+                    from = &buffer2_pow2_sum_gpu;
+                }
+
+            }
         } else {
             rassert(false, 4531412341, context.type());
         }
