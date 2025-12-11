@@ -16,6 +16,6 @@ __kernel void radix_sort_02_global_prefixes_scan_sum_reduction(
     unsigned int gid = get_global_id(0);
     if ((gid+1)*2>n) {return;}
     uint2 v = vload2(gid, pow2_sum);
-    vstore(v.lo+v.hi, gid, next_pow2_sum);
+    next_pow2_sum[gid] = v.s0 + v.s1;
     return;
 }
