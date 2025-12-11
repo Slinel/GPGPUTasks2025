@@ -5,15 +5,40 @@
 #include "helpers/rassert.cl"
 #include "../defines.h"
 
-__attribute__((reqd_work_group_size(1, 1, 1)))
+__attribute__((reqd_work_group_size(GROUP_SIZE, 1, 1)))
 __kernel void radix_sort_04_scatter(
-    // это лишь шаблон! смело меняйте аргументы и используемые буфера! можете сделать даже больше кернелов, если это вызовет затруднения - смело спрашивайте в чате
-    // НЕ ПОДСТРАИВАЙТЕСЬ ПОД СИСТЕМУ! СВЕРНИТЕ С РЕЛЬС!! БУНТ!!! АНТИХАЙП!11!!1
-    __global const uint* buffer1,
-    __global const uint* buffer2,
-                   uint* buffer3,
-    unsigned int a1,
-    unsigned int a2)
+    __global const uint* from,
+    __global       uint* to,
+    unsigned int n,
+    unsigned int letter_idx,
+    __global const uint* pref0,
+    __global const uint* pref1,
+    __global const uint* pref2,
+    __global const uint* pref3)
 {
-    // TODO
+    unsigned int gid = get_global_id(0);
+    if(gid<n) {
+        unsigned int val = from[gid];
+        unsigned int mask = ((1<<letter_len_in_bits)-1)<<letter_idx;
+        unsigned int letter_value = (val&mask)>>letter_idx;
+        unsigned int idx = 0;
+        if(letter_value==0) {
+            idx=pref0[gid]-1;
+        } else if(letter_value==1) {
+            idx=pref1[gid]-1;
+            idx+=pref0[n-1];
+        } else if(letter_value==2) {
+            idx=pref2[gid]-1;
+            idx+=pref0[n-1];
+            idx+=pref1[n-1];
+        } else if(letter_value==3) {
+            idx=pref3[gid]-1;
+            idx+=pref0[n-1];
+            idx+=pref1[n-1];
+            idx+=pref2[n-1];
+        }
+        //printf("gid: %d letter: %d idx: %d", gid, letter_value, idx);
+        to[idx] = val;
+    }
+    return;
 }
