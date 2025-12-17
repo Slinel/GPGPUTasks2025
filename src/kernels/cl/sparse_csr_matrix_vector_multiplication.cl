@@ -18,16 +18,9 @@ __kernel void sparse_csr_matrix_vector_multiplication(
     uint lid = get_local_id(0);
     accum[lid] = 0;
 
-    uint l;
-    uint r;
-    if(lid==0) {
-        uint group_id = get_group_id(0);
-        l = csr_row_offsets[group_id];
-        r = csr_row_offsets[group_id + 1];
-    }
-    l = sub_group_broadcast(l, 0);
-    r = sub_group_broadcast(r, 0);
-
+    uint group_id = get_group_id(0);
+    uint l = csr_row_offsets[group_id];
+    uint r = csr_row_offsets[group_id + 1];
 
     uint idx = l+lid;
     while (idx<r) {
