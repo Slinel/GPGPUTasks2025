@@ -25,8 +25,8 @@ __kernel void sparse_csr_matrix_vector_multiplication(
         l = csr_row_offsets[group_id];
         r = csr_row_offsets[group_id + 1];
     }
-    l = work_group_broadcast(l, 0);
-    r = work_group_broadcast(r, 0);
+    l = sub_group_broadcast(l, 0);
+    r = sub_group_broadcast(r, 0);
 
 
     uint idx = l+lid;
@@ -36,7 +36,6 @@ __kernel void sparse_csr_matrix_vector_multiplication(
         accum[lid]+=(v*m);
         idx+=GROUP_SIZE;
     }
-
 
     uint sum = 0;
     if(get_local_id(0)==0) {
