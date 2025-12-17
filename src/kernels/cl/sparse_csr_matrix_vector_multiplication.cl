@@ -30,6 +30,8 @@ __kernel void sparse_csr_matrix_vector_multiplication(
         idx+=GROUP_SIZE;
     }
 
+    barrier(CLK_LOCAL_MEM_FENCE);
+
     uint sum = 0;
     if(get_local_id(0)==0) {
         for(uint i = 0; i<GROUP_SIZE; ++i) {
