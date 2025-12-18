@@ -1,3 +1,21 @@
+float sdCapsule( vec3 p, vec3 a, vec3 b, float r )
+{
+    vec3 pa = p - a, ba = b - a;
+    float h = clamp( dot(pa,ba)/dot(ba,ba), 0.0, 1.0 );
+    return length( pa - ba*h ) - r;
+}
+
+float sdRoundCone( vec3 p, float r1, float r2, float h )
+{
+    float b = (r1-r2)/h;
+    float a = sqrt(1.0-b*b);
+
+    vec2 q = vec2( length(p.xz), p.y );
+    float k = dot(q,vec2(-b,a));
+    if( k<0.0 ) return length(q) - r1;
+    if( k>a*h ) return length(q-vec2(0.0,h)) - r2;
+    return dot(q, vec2(a,b) ) - r1;
+}
 
 // sphere with center in (0, 0, 0)
 float sdSphere(vec3 p, float r)
@@ -30,8 +48,41 @@ vec4 sdBody(vec3 p)
 {
     float d = 1e10;
 
-    // TODO
-    d = sdSphere((p - vec3(0.0, 0.35, -0.7)), 0.35);
+    // Тело скругленный конус
+    // d = sdSphere((p - vec3(0.0, 0.35, -0.7)), 0.35);
+    d = min(d, sdRoundCone(p-vec3(0.0, 0.35, 0.0), 0.2, 0.15, 0.2));
+
+    // Ноги - палки
+    vec3 a = vec3(0.07, 0.0, 0.0);
+    vec3 b = vec3(0.085, -0.25, 0.0);
+    d = min(d, sdCapsule(
+    p-vec3(0.0, 0.35, 0.0),
+    a, b, 0.03));
+    a.x = -a.x;
+    b.x = -b.x;
+    d = min(d, sdCapsule(
+    p-vec3(0.0, 0.35, 0.0),
+    a, b, 0.03));
+
+    // Рука левая
+    a = vec3(0.16, 0.12, 0.0);
+    b = vec3(
+    a.x-(0.16)*cos(0.0 +4.4),
+    a.y-(0.16)*cos(1.55+4.4),
+    0.0);
+    d = min(d, sdCapsule(
+    p-vec3(0.0, 0.35, 0.0),
+    a, b, 0.03));
+
+    // Рука правая
+    a.x = -a.x;
+    b = vec3(
+    a.x-(0.16)*abs(cos(0.0+0.4+iTime)),
+    a.y+(0.16)*abs(cos(1.5+0.4+iTime)),
+    0.0);
+    d = min(d, sdCapsule(
+    p-vec3(0.0, 0.35, 0.0),
+    a, b, 0.03));
 
     // return distance and color
     return vec4(d, vec3(0.0, 1.0, 0.0));
@@ -39,10 +90,26 @@ vec4 sdBody(vec3 p)
 
 vec4 sdEye(vec3 p)
 {
+    vec3 color = vec3(0.0, 0.0, 0.0);
+    float t, d = 1e10;
 
-    vec4 res = vec4(1e10, 0.0, 0.0, 0.0);
+    t = sdSphere((p - vec3(0.0, 0.53, 0.10)), 0.1);
+    if(t<d) {
+        d = t;
+        color = vec3(1.0, 1.0, 1.0);}
 
-    return res;
+    t = sdSphere((p - vec3(0.0, 0.531, 0.14)), 0.07);
+    if(t<d) {
+        d = t;
+        color = vec3(0.42, 0.83, 0.87);}
+
+    t = sdSphere((p - vec3(0.0, 0.531, 0.18)), 0.04);
+    if(t<d) {
+        d = t;
+        color = vec3(0.0, 0.0, 0.0);}
+
+
+    return vec4(d, color);
 }
 
 vec4 sdMonster(vec3 p)
@@ -55,8 +122,7 @@ vec4 sdMonster(vec3 p)
 
     vec4 eye = sdEye(p);
     if (eye.x < res.x) {
-        res = eye;
-    }
+        res = eye;}
 
     return res;
 }
