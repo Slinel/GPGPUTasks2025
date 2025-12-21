@@ -33,6 +33,60 @@ static inline bool bvh_closest_hit(
 
     // TODO implement BVH travering (with stack, don't use recursion)
 
+    int bestFaceId = -1;
+    float bestT = FLT_MAX;
+    float bestU = 0.0f;
+    float bestV = 0.0f;
+
+    int stack[RT_STACK_DEPTH];
+    int stackPtr = 1;
+    stack[0] = rootIndex;
+
+    while (stackPtr > 0) {
+        int nodeIdx = stack[--stackPtr];
+        __global const BVHNodeGPU* node = &nodes[nodeIdx];
+        // тут я искренне забыл как делать не рекурсивный дфс, спросил шаблон (для стека) у ллм,
+        // потому что вспоминать в каком порядке двигать поинтер чтобы не промахнуться - тяжело и не продуктивно
+
+
+        float tNear, tFar;
+        if(!intersect_ray_aabb(orig, dir, node->aabb, tMin, bestT, &tNear, &tFar)) {continue;}
+        if(tNear > bestT) {continue;} // кикаем боксы которые дальше чем ближайший найденный фэйс
+
+        if(nodeIdx >= leafStart) {
+            uint triIdx = leafTriIndices[nodeIdx - leafStart];
+            uint3 face = loadFace(faces, triIdx);
+            float t, u, v;
+
+            bool intersected = intersect_ray_triangle(
+                    orig, dir,
+                    loadVertex(vertices, face.x),
+                    loadVertex(vertices, face.y),
+                    loadVertex(vertices, face.z),
+                    tMin, bestT, false,
+                    &t, &u, &v);
+
+            if(intersected && t < bestT) {
+                bestT = t;
+                bestFaceId = triIdx;
+                bestU = u;
+                bestV = v;
+            }
+
+        } else {
+            stack[stackPtr++] = node->leftChildIndex;
+            stack[stackPtr++] = node->rightChildIndex;
+        }
+    }
+
+    if (bestFaceId != -1) {
+        *outT = bestT;
+        *outFaceId = bestFaceId;
+        *outU = bestU;
+        *outV = bestV;
+        return true;
+    }
+
     return false;
 }
 
@@ -51,6 +105,38 @@ static inline bool any_hit_from(
     const int leafStart = (int)nfaces - 1;
 
     // TODO implement BVH travering (with stack, don't use recursion)
+    int stack[RT_STACK_DEPTH];
+    int stackPtr = 1;
+    stack[0] = rootIndex;
+
+    while (stackPtr > 0) {
+        int nodeIdx = stack[--stackPtr];
+        __global const BVHNodeGPU* node = &nodes[nodeIdx];
+
+        float tNear, tFar;
+        if (!intersect_ray_aabb(orig, dir, node->aabb, 0.0f, FLT_MAX, &tNear, &tFar)) {continue;}
+
+        if (nodeIdx >= leafStart) {
+            uint triIdx = leafTriIndices[nodeIdx - leafStart];
+            if ((int)triIdx == ignore_face) {continue;} // чуть не забыл
+            uint3 face = loadFace(faces, triIdx);
+            float t, u, v;
+
+            bool intersected = intersect_ray_triangle(
+                    orig, dir,
+                    loadVertex(vertices, face.x),
+                    loadVertex(vertices, face.y),
+                    loadVertex(vertices, face.z),
+                    0.0f, FLT_MAX, false,
+                    &t, &u, &v);
+
+            if (intersected) {return true;}
+
+        } else {
+            stack[stackPtr++] = node->leftChildIndex;
+            stack[stackPtr++] = node->rightChildIndex;
+        }
+    }
 
     return false;
 }

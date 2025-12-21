@@ -123,7 +123,7 @@ static inline int find_split(const std::vector<uint32_t>& codes,
 //   Internal nodes: indices [0 .. N-2]
 //   Leaf nodes:     indices [N-1 .. 2*N-2]
 //   Leaf at index (N-1 + i) corresponds to outLeafTriIndices[i].
-inline void buildLBVH_CPU(
+inline unsigned int buildLBVH_CPU(
     const std::vector<point3f>& vertices,
     const std::vector<point3u>& faces,
     std::vector<BVHNodeGPU>&    outNodes,
@@ -134,7 +134,7 @@ inline void buildLBVH_CPU(
     outLeafTriIndices.clear();
 
     if (N == 0) {
-        return;
+        return 0;
     }
 
     // Special case: single triangle -> single leaf/root
@@ -162,7 +162,7 @@ inline void buildLBVH_CPU(
         node.rightChildIndex = std::numeric_limits<GPUC_UINT>::max();
 
         outLeafTriIndices[0] = 0;
-        return;
+        return 1;
     }
 
     // Per-triangle info
@@ -315,6 +315,11 @@ inline void buildLBVH_CPU(
     }
     rassert(traversalOrder.size() == N-1, 354623412341, traversalOrder.size(), N);
 
+    // добавил логику для расчета глубины дерева, чтобы не гадать с размером стека при обходе
+    std::vector<unsigned int> depths(2 * N - 1, 0);
+    for (size_t i = N - 1; i < 2 * N - 1; ++i) {depths[i] = 1;}
+    unsigned int maxDepth = 1;
+
     // 7.2) AABB propagation for internal nodes in the bottom-up traversal order
     for (int j = traversalOrder.size() - 1; j >= 0; --j) {
         int i = traversalOrder[j];
@@ -332,5 +337,10 @@ inline void buildLBVH_CPU(
         aabb.max_z = std::max(left.aabb.max_z, right.aabb.max_z);
 
         node.aabb = aabb;
+
+        depths[i] = std::max(depths[node.leftChildIndex], depths[node.rightChildIndex]) + 1;
+        maxDepth = std::max(maxDepth, depths[i]);
     }
+
+    return maxDepth;
 }

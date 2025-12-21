@@ -5,6 +5,8 @@
 #define GROUP_SIZE_X 16
 #define GROUP_SIZE_Y 16
 
+#define RT_STACK_DEPTH 45 // Эта константа верна только для трех сцен в выборке,
+
 #define AO_SAMPLES   8
 
 #define RASSERT_ENABLED 0 // disabled by default, enable for debug by changing 0 to 1, disable before performance evaluation/profiling/commiting
