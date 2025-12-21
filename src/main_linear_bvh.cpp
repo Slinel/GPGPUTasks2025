@@ -442,11 +442,6 @@ void run(int argc, char** argv)
             framebuffer_ambient_occlusion_gpu.fill(NO_AMBIENT_OCCLUSION);
             cleaning_framebuffers_time += cleaning_framebuffers_t.elapsed();
 
-            gpu::shared_device_buffer_typed<BVHNodeGPU> lbvh_nodes_gpu(lbvh_nodes_cpu.size());
-            gpu::gpu_mem_32u leaf_faces_indices_gpu(leaf_faces_indices_cpu.size());
-            lbvh_nodes_gpu.writeN(lbvh_nodes_cpu.data(), lbvh_nodes_cpu.size());
-            leaf_faces_indices_gpu.writeN(leaf_faces_indices_cpu.data(), leaf_faces_indices_cpu.size());
-
             std::vector<double> gpu_lbvh_rt_times;
             for (int iter = 0; iter < niters; ++iter) {
                 timer t;

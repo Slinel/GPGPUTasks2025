@@ -28,7 +28,7 @@ static inline int clz32(uint x) {
     return n;
 }
 
-static inline int common_prefix(const MortonCode* codes, int N, int i, int j)
+static inline int common_prefix(__global const MortonCode* codes, int N, int i, int j)
 {
     if (j < 0 || j >= N) return -1;
 
@@ -48,7 +48,7 @@ static inline int common_prefix(const MortonCode* codes, int N, int i, int j)
 
 
 // Determine range [first, last] of primitives covered by internal node i
-static inline void determine_range(const uint* codes, int N, int i, int* outFirst, int* outLast)
+static inline void determine_range(__global const MortonCode* codes, int N, int i, int* outFirst, int* outLast)
 {
     int cpL = common_prefix(codes, N, i, i - 1);
     int cpR = common_prefix(codes, N, i, i + 1);
@@ -79,7 +79,7 @@ static inline void determine_range(const uint* codes, int N, int i, int* outFirs
 
 // Find split position inside range [first, last] using the same
 // prefix metric as determine_range (code + index tie-break)
-static inline int find_split(const uint* codes, int first, int last, int nfaces)
+static inline int find_split(__global const MortonCode* codes, int first, int last, int nfaces)
 {
     const int N = (int)(nfaces);
 
