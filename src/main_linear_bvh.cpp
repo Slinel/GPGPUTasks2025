@@ -265,10 +265,16 @@ void run(int argc, char** argv)
         if (gpu_lbvg_gpu_rt_done) {
 
             gpu::shared_device_buffer_typed<BVHNodeGPU> lbvh_nodes_gpu(nfaces*2-1);
-            gpu::shared_device_buffer_typed<MortonCode> morton_codes_gpu(nfaces);
-            gpu::gpu_mem_32u leaf_faces_indices_gpu(1);
+
+            gpu::shared_device_buffer_typed<MortonCode> morton_codes_gpu1(nfaces);
+            gpu::shared_device_buffer_typed<MortonCode> morton_codes_gpu2(nfaces);
+            gpu::gpu_mem_32u faces_indices_gpu1(nfaces);
+            gpu::gpu_mem_32u faces_indices_gpu2(nfaces);
+            gpu::shared_device_buffer_typed<BVHNodeGPU> lbvh_nodes(2*nfaces-1);
 
             ocl::KernelSource ocl_build_morton(ocl::getBuildMorton());
+            ocl::KernelSource ocl_merge_sort_morton(ocl::getMergeSortMorton());
+            ocl::KernelSource ocl_setup_BVH_tree(ocl::getSetupBVHTree());
 
             std::vector<double> gpu_lbvh_times;
             for (int iter = 0; iter < niters; ++iter) {
@@ -280,15 +286,49 @@ void run(int argc, char** argv)
                         gpu::WorkSize(32, nfaces),
                         vertices_gpu,
                         faces_gpu,
-                        morton_codes_gpu,
+                        morton_codes_gpu1,
+                        faces_indices_gpu1,
                         nfaces);
-
                 // 2 Этап
                 // Отсортировать коды, по этим же индексам отсортировать leaf_indices_gpu
-
+                unsigned int k = 1;
+                gpu::shared_device_buffer_typed<MortonCode>* merge_code_from = &morton_codes_gpu1;
+                gpu::gpu_mem_32u*                            merge_indx_from = &faces_indices_gpu1;
+                gpu::shared_device_buffer_typed<MortonCode>* merge_code_to   = &morton_codes_gpu2;
+                gpu::gpu_mem_32u*                            merge_indx_to   = &faces_indices_gpu2;
+                while (k < nfaces) {
+                    ocl_merge_sort_morton.exec(
+                        gpu::WorkSize(GROUP_SIZE, nfaces),
+                            *merge_code_from,
+                            *merge_code_to,
+                            *merge_indx_from,
+                            *merge_indx_to,
+                        k, nfaces);
+                    k*=2;
+                    if (merge_code_to == &morton_codes_gpu2) {
+                        merge_code_from = &morton_codes_gpu2;
+                        merge_indx_from = &faces_indices_gpu2;
+                        merge_code_to = &morton_codes_gpu1;
+                        merge_indx_to = &faces_indices_gpu1;
+                    } else {
+                        merge_code_from = &morton_codes_gpu1;
+                        merge_indx_from = &faces_indices_gpu1;
+                        merge_code_to = &morton_codes_gpu2;
+                        merge_indx_to = &faces_indices_gpu2;
+                    }
+                }
                 // 3 Этап
                 // Постоить BVH
+                ocl_setup_BVH_tree.exec(
+                    gpu::WorkSize(32, nfaces),
+                        *merge_code_from,
+                        *merge_indx_from,
+                        lbvh_nodes,
+                        nfaces);
 
+
+                //lbvh_nodes_gpu.clmem(),
+                //leaf_faces_indices_gpu.clmem()
                 gpu_lbvh_times.push_back(t.elapsed());
             }
             gpu_lbvh_time_sum = stats::sum(gpu_lbvh_times);
@@ -306,12 +346,12 @@ void run(int argc, char** argv)
             for (int iter = 0; iter < niters; ++iter) {
                 timer t;
 
-                ocl_rt_with_lbvh.exec(
-                        gpu::WorkSize(16, 16, width, height),
-                        vertices_gpu, faces_gpu,
-                        lbvh_nodes_gpu.clmem(), leaf_faces_indices_gpu.clmem(),
-                        framebuffer_face_id_gpu, framebuffer_ambient_occlusion_gpu,
-                        camera_gpu.clmem(), nfaces);
+                //ocl_rt_with_lbvh.exec(
+                //        gpu::WorkSize(16, 16, width, height),
+                //        vertices_gpu, faces_gpu,
+                //        lbvh_nodes_gpu.clmem(), leaf_faces_indices_gpu.clmem(),
+                //        framebuffer_face_id_gpu, framebuffer_ambient_occlusion_gpu,
+                //        camera_gpu.clmem(), nfaces);
 
                 gpu_lbvh_rt_times.push_back(t.elapsed());
             }

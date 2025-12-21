@@ -4,6 +4,8 @@
 #include "cl/generated_kernels/ray_tracing_render_brute_force.h"
 #include "cl/generated_kernels/ray_tracing_render_using_lbvh.h"
 #include "cl/generated_kernels/build_morton.h"
+#include "cl/generated_kernels/merge_sort_morton.h"
+#include "cl/generated_kernels/setup_BVH_tree.h"
 
 #include "vk/generated_kernels/aplusb_comp.h"
 #include "vk/generated_kernels/ray_tracing_render_brute_force_comp.h"
@@ -60,6 +62,14 @@ const ProgramBinaries& getRTWithLBVH()
 const ProgramBinaries& getBuildMorton()
 {
     return opencl_binaries_build_morton;
+}
+const ProgramBinaries& getMergeSortMorton()
+{
+    return opencl_binaries_merge_sort_morton;
+}
+const ProgramBinaries& getSetupBVHTree()
+{
+    return opencl_binaries_setup_BVH_tree;
 }
 } // namespace ocl
 
