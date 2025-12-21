@@ -31,6 +31,9 @@ const ProgramBinaries& getRTWithLBVH();
 const ProgramBinaries& getBuildMorton();
 const ProgramBinaries& getMergeSortMorton();
 const ProgramBinaries& getSetupBVHTree();
+const ProgramBinaries& getCalculateAABBs();
+const ProgramBinaries& getDenoiser();
+
 }
 
 namespace avk2 {

@@ -6,6 +6,8 @@
 #include "cl/generated_kernels/build_morton.h"
 #include "cl/generated_kernels/merge_sort_morton.h"
 #include "cl/generated_kernels/setup_BVH_tree.h"
+#include "cl/generated_kernels/calculate_aabbs.h"
+#include "cl/generated_kernels/denoise.h"
 
 #include "vk/generated_kernels/aplusb_comp.h"
 #include "vk/generated_kernels/ray_tracing_render_brute_force_comp.h"
@@ -71,6 +73,15 @@ const ProgramBinaries& getSetupBVHTree()
 {
     return opencl_binaries_setup_BVH_tree;
 }
+const ProgramBinaries& getCalculateAABBs()
+{
+    return opencl_binaries_calculate_aabbs;
+}
+const ProgramBinaries& getDenoiser()
+{
+    return opencl_binaries_denoise;
+}
+
 } // namespace ocl
 
 namespace avk2 {

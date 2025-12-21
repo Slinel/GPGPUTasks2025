@@ -15,6 +15,8 @@
 
 #include "cpu_helpers/build_bvh_cpu.h"
 
+#include "debug/debug_bvh.h"
+
 #include <filesystem>
 #include <fstream>
 
@@ -190,18 +192,40 @@ void run(int argc, char** argv)
             images_saving_time += images_saving_t.elapsed();
         }
 
+        bool debug = false;
         double cpu_lbvh_time = 0.0;
         double rt_times_with_cpu_lbvh_sum = 0.0;
+        int count = 0;
+        point3f cMin;
+        point3f cMax;
+        std::vector<uint32_t> sorted_codes_cpu(nfaces);
+        std::vector<uint32_t> leaf_faces_indices_cpu;
+        std::vector<MortonCode> morton_codes_cpu(nfaces);
+        std::vector<BVHNodeGPU> lbvh_nodes_cpu;
+
         {
-            std::vector<BVHNodeGPU> lbvh_nodes_cpu;
-            std::vector<uint32_t> leaf_faces_indices_cpu;
+
             timer cpu_lbvh_t;
-            unsigned int BVH_depth = buildLBVH_CPU(scene.vertices, scene.faces, lbvh_nodes_cpu, leaf_faces_indices_cpu);
+            unsigned int BVH_depth = buildLBVH_CPU(scene.vertices, scene.faces,
+                lbvh_nodes_cpu,
+                leaf_faces_indices_cpu,
+                morton_codes_cpu,
+                cMin,
+                cMax,
+                sorted_codes_cpu);
+
+            if (debug) {
+                //debug::dump_bvh_all_boxes_ply("results/bvh_all_cpu.ply", lbvh_nodes_cpu);
+                debug::dump_bvh_boxes_ply("results/bvh_leaves_cpu.ply", lbvh_nodes_cpu, BVH_depth-2, BVH_depth);
+            }
+
             cpu_lbvh_time = cpu_lbvh_t.elapsed();
             double build_mtris_per_sec = nfaces * 1e-6f / cpu_lbvh_time;
             std::cout << "CPU build LBVH in " << cpu_lbvh_time << " sec" << std::endl;
             std::cout << "CPU LBVH build performance: " << build_mtris_per_sec << " MTris/s" << std::endl;
             std::cout << "CPU BVH depth: " << BVH_depth << std::endl; //Хотел прикинуть какая глубина стека нужна
+            std::cout << "CPU BVH bounds: "
+                << cMin.x <<' '<< cMin.y <<' '<< cMin.z <<' '<< cMax.x <<' '<< cMax.y <<' '<< cMax.z<< std::endl;
 
             gpu::shared_device_buffer_typed<BVHNodeGPU> lbvh_nodes_gpu(lbvh_nodes_cpu.size());
             gpu::gpu_mem_32u leaf_faces_indices_gpu(leaf_faces_indices_cpu.size());
@@ -264,17 +288,21 @@ void run(int argc, char** argv)
 
         if (gpu_lbvg_gpu_rt_done) {
 
-            gpu::shared_device_buffer_typed<BVHNodeGPU> lbvh_nodes_gpu(nfaces*2-1);
-
             gpu::shared_device_buffer_typed<MortonCode> morton_codes_gpu1(nfaces);
             gpu::shared_device_buffer_typed<MortonCode> morton_codes_gpu2(nfaces);
             gpu::gpu_mem_32u faces_indices_gpu1(nfaces);
             gpu::gpu_mem_32u faces_indices_gpu2(nfaces);
+            gpu::gpu_mem_32u faces_parents(2*nfaces-1);
             gpu::shared_device_buffer_typed<BVHNodeGPU> lbvh_nodes(2*nfaces-1);
+            gpu::shared_device_buffer_typed<MortonCode>* merge_code_from = &morton_codes_gpu1;
+            gpu::gpu_mem_32u*                            merge_indx_from = &faces_indices_gpu1;
+            gpu::shared_device_buffer_typed<MortonCode>* merge_code_to   = &morton_codes_gpu2;
+            gpu::gpu_mem_32u*                            merge_indx_to   = &faces_indices_gpu2;
 
             ocl::KernelSource ocl_build_morton(ocl::getBuildMorton());
             ocl::KernelSource ocl_merge_sort_morton(ocl::getMergeSortMorton());
             ocl::KernelSource ocl_setup_BVH_tree(ocl::getSetupBVHTree());
+            ocl::KernelSource ocl_calculate_aabbs(ocl::getCalculateAABBs());
 
             std::vector<double> gpu_lbvh_times;
             for (int iter = 0; iter < niters; ++iter) {
@@ -288,20 +316,34 @@ void run(int argc, char** argv)
                         faces_gpu,
                         morton_codes_gpu1,
                         faces_indices_gpu1,
-                        nfaces);
+                        nfaces,
+                        cMin.x,cMin.y,cMin.z,
+                        cMax.x,cMax.y,cMax.z);
+                        // Тут переиспользую границы сцены от cpu, потому что даже в массовом параллелиме, их можно считать
+                        // что они предподсчитаны создателем сцены, писать свертку для поиска границ сцены я не буду
+
+
+                if (debug) {
+                    std::vector<MortonCode> morton_codes_gpu = morton_codes_gpu1.readVector(nfaces);
+                    for (size_t q = 0; q < nfaces; q++) {
+                        if (morton_codes_cpu[q]!=morton_codes_gpu[q]) {
+                            std::cout<<"bs on "<<q<<"-th position (unsorted_codes)"<<'\n';
+                            break;}}
+                }
+
                 // 2 Этап
                 // Отсортировать коды, по этим же индексам отсортировать leaf_indices_gpu
+                merge_code_from = &morton_codes_gpu1;
+                merge_indx_from = &faces_indices_gpu1;
+                merge_code_to   = &morton_codes_gpu2;
+                merge_indx_to   = &faces_indices_gpu2;
                 unsigned int k = 1;
-                gpu::shared_device_buffer_typed<MortonCode>* merge_code_from = &morton_codes_gpu1;
-                gpu::gpu_mem_32u*                            merge_indx_from = &faces_indices_gpu1;
-                gpu::shared_device_buffer_typed<MortonCode>* merge_code_to   = &morton_codes_gpu2;
-                gpu::gpu_mem_32u*                            merge_indx_to   = &faces_indices_gpu2;
                 while (k < nfaces) {
                     ocl_merge_sort_morton.exec(
                         gpu::WorkSize(GROUP_SIZE, nfaces),
                             *merge_code_from,
-                            *merge_code_to,
                             *merge_indx_from,
+                            *merge_code_to,
                             *merge_indx_to,
                         k, nfaces);
                     k*=2;
@@ -317,19 +359,77 @@ void run(int argc, char** argv)
                         merge_indx_to = &faces_indices_gpu2;
                     }
                 }
+
+                //Надо было с самого начала проверяться, все неправильно было
+                if (debug) {
+                    //работает ли сортировка лол, у меня идеи кончаются
+                    std::vector<MortonCode> sorted_codes_gpu = merge_code_from->readVector(nfaces);
+                    count = 0;
+                    for (size_t q = 0; q < nfaces; q++) {
+                        if (sorted_codes_cpu[q]!=sorted_codes_gpu[q]) {
+                            std::cout<<"issue on idx: "<<q<<", cpu: "<<sorted_codes_cpu[q]
+                            <<", gpu: "<<sorted_codes_gpu[q]<<" (sorted_codes) "<<'\n';
+                            count++;
+                            if (count>=10) {break;}}}
+
+                    std::vector<uint32_t> sorted_face_indices_gpu = merge_indx_from->readVector(nfaces);
+                    count = 0;
+                    for (size_t q = 0; q < nfaces; q++) {
+                        if (leaf_faces_indices_cpu[q]!=sorted_face_indices_gpu[q]) {
+                            std::cout<<"issue on idx: "<<q<<", cpu: "<<leaf_faces_indices_cpu[q]
+                            <<", gpu: "<<sorted_face_indices_gpu[q]<<" (sorted_indices) "<<'\n';
+                            count++;
+                            if (count>=10) {break;}}}
+                }
+
                 // 3 Этап
-                // Постоить BVH
+                // Постоить BVH (только структуру, без боксов)
                 ocl_setup_BVH_tree.exec(
                     gpu::WorkSize(32, nfaces),
                         *merge_code_from,
-                        *merge_indx_from,
-                        lbvh_nodes,
+                        lbvh_nodes.clmem(),
+                        faces_parents,
                         nfaces);
 
+                ocl_calculate_aabbs.exec(
+                    gpu::WorkSize(32, nfaces),
+                        lbvh_nodes.clmem(),
+                        faces_parents,
+                        *merge_indx_from,
+                        vertices_gpu,
+                        faces_gpu,
+                        nfaces);
 
-                //lbvh_nodes_gpu.clmem(),
-                //leaf_faces_indices_gpu.clmem()
+                if (debug) {
+                    std::vector<BVHNodeGPU> bvh_nodes_gpu = lbvh_nodes.readVector(2*nfaces-1);
+                    count = 0;
+                    std::cout<<"faces count: "<<nfaces<<'\n';
+                    for (size_t q = 0; q < (2*nfaces-1); q++) {
+                        if (lbvh_nodes_cpu[q].leftChildIndex!=bvh_nodes_gpu[q].leftChildIndex ||
+                            lbvh_nodes_cpu[q].rightChildIndex!=bvh_nodes_gpu[q].rightChildIndex) {
+                            std::cout<<"issue on idx: "<<q<<", cpu: "<<lbvh_nodes_cpu[q].leftChildIndex
+                                                          <<", gpu: "<< bvh_nodes_gpu[q].leftChildIndex    <<" (arranged_left_nodes) "  <<'\n';
+                            std::cout<<"issue on idx: "<<q<<", cpu: "<<lbvh_nodes_cpu[q].rightChildIndex
+                                                          <<", gpu: "<< bvh_nodes_gpu[q].rightChildIndex   <<" (arranged_right_nodes) " <<'\n';
+                            count++;
+                            if (count>=10) {break;}}
+
+                        if (abs(lbvh_nodes_cpu[q].aabb.min_x - bvh_nodes_gpu[q].aabb.min_x)>0.001 ||
+                            abs(lbvh_nodes_cpu[q].aabb.min_y - bvh_nodes_gpu[q].aabb.min_y)>0.001 ||
+                            abs(lbvh_nodes_cpu[q].aabb.min_z - bvh_nodes_gpu[q].aabb.min_z)>0.001) {
+                            std::cout<<"issue on idx: "<<q<<", cpu: "<<lbvh_nodes_cpu[q].aabb.min_y
+                                                          <<", gpu: "<< bvh_nodes_gpu[q].aabb.min_y    <<" (box size) "  <<'\n';
+                            count++;
+                            //if (count>=100) {break;}
+                            }}
+
+                    //debug::dump_bvh_all_boxes_ply("results/bvh_all_пpu.ply", lbvh_nodes_cpu);
+                    std::vector<BVHNodeGPU> nodes_gpu = lbvh_nodes.readVector(nfaces);
+                    debug::dump_bvh_boxes_ply("results/bvh_leaves_gpu.ply", nodes_gpu, 18-2, 18);
+                }
+
                 gpu_lbvh_times.push_back(t.elapsed());
+
             }
             gpu_lbvh_time_sum = stats::sum(gpu_lbvh_times);
             double build_mtris_per_sec = nfaces * 1e-6f / stats::median(gpu_lbvh_times);
@@ -342,16 +442,21 @@ void run(int argc, char** argv)
             framebuffer_ambient_occlusion_gpu.fill(NO_AMBIENT_OCCLUSION);
             cleaning_framebuffers_time += cleaning_framebuffers_t.elapsed();
 
+            gpu::shared_device_buffer_typed<BVHNodeGPU> lbvh_nodes_gpu(lbvh_nodes_cpu.size());
+            gpu::gpu_mem_32u leaf_faces_indices_gpu(leaf_faces_indices_cpu.size());
+            lbvh_nodes_gpu.writeN(lbvh_nodes_cpu.data(), lbvh_nodes_cpu.size());
+            leaf_faces_indices_gpu.writeN(leaf_faces_indices_cpu.data(), leaf_faces_indices_cpu.size());
+
             std::vector<double> gpu_lbvh_rt_times;
             for (int iter = 0; iter < niters; ++iter) {
                 timer t;
 
-                //ocl_rt_with_lbvh.exec(
-                //        gpu::WorkSize(16, 16, width, height),
-                //        vertices_gpu, faces_gpu,
-                //        lbvh_nodes_gpu.clmem(), leaf_faces_indices_gpu.clmem(),
-                //        framebuffer_face_id_gpu, framebuffer_ambient_occlusion_gpu,
-                //        camera_gpu.clmem(), nfaces);
+                ocl_rt_with_lbvh.exec(
+                        gpu::WorkSize(16, 16, width, height),
+                        vertices_gpu, faces_gpu,
+                        lbvh_nodes.clmem(), *merge_indx_from,
+                        framebuffer_face_id_gpu, framebuffer_ambient_occlusion_gpu,
+                        camera_gpu.clmem(), nfaces);
 
                 gpu_lbvh_rt_times.push_back(t.elapsed());
             }
@@ -372,6 +477,23 @@ void run(int argc, char** argv)
             debug_io::dumpImage(results_dir + "/framebuffer_face_ids_with_gpu_lbvh.bmp", debug_io::randomMapping(gpu_lbvh_framebuffer_face_ids, NO_FACE_ID));
             debug_io::dumpImage(results_dir + "/framebuffer_ambient_occlusion_with_gpu_lbvh.bmp", debug_io::depthMapping(gpu_lbvh_framebuffer_ambient_occlusion));
             images_saving_time += gpu_lbvh_images_saving_t.elapsed();
+
+            bool denoising = true;
+            if (denoising) {
+                gpu::gpu_mem_32f framebuffer_denoised(width * height);
+                ocl::KernelSource ocl_denoise(ocl::getDenoiser());
+                ocl_denoise.exec(
+                            gpu::WorkSize(32, 1, width, height),
+                            framebuffer_ambient_occlusion_gpu,
+                            framebuffer_denoised,
+                            width, height);
+
+                image32f gpu_lbvh_framebuffer_ambient_occlusion_denoised(width, height, 1);
+                framebuffer_denoised.readN(gpu_lbvh_framebuffer_ambient_occlusion_denoised.ptr(), width * height);
+                debug_io::dumpImage(results_dir + "/framebuffer_ambient_occlusion_with_gpu_lbvh_denoised.bmp",
+                            debug_io::depthMapping(gpu_lbvh_framebuffer_ambient_occlusion_denoised));
+            }
+
             if (has_brute_force) {
                 unsigned int count_ao_errors = countDiffs(brute_force_framebuffer_ambient_occlusion, gpu_lbvh_framebuffer_ambient_occlusion, 0.01f);
                 unsigned int count_face_id_errors = countDiffs(brute_force_framebuffer_face_ids, gpu_lbvh_framebuffer_face_ids, 1);

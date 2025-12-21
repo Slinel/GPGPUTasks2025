@@ -127,7 +127,11 @@ inline unsigned int buildLBVH_CPU(
     const std::vector<point3f>& vertices,
     const std::vector<point3u>& faces,
     std::vector<BVHNodeGPU>&    outNodes,
-    std::vector<uint32_t>&      outLeafTriIndices)
+    std::vector<uint32_t>&      outLeafTriIndices,
+    std::vector<MortonCode>&    morton_codes,
+    point3f& cMin,
+    point3f& cMax,
+    std::vector<uint32_t>& sortedCodes)
 {
     const size_t N = faces.size();
     outNodes.clear();
@@ -176,10 +180,10 @@ inline unsigned int buildLBVH_CPU(
     std::vector<Prim> prims(N);
 
     // 1) Compute per-triangle AABB and centroids
-    point3f cMin{+std::numeric_limits<float>::infinity(),
+    cMin = {+std::numeric_limits<float>::infinity(),
         +std::numeric_limits<float>::infinity(),
         +std::numeric_limits<float>::infinity()};
-    point3f cMax{-std::numeric_limits<float>::infinity(),
+    cMax = {-std::numeric_limits<float>::infinity(),
         -std::numeric_limits<float>::infinity(),
         -std::numeric_limits<float>::infinity()};
 
@@ -235,6 +239,7 @@ inline unsigned int buildLBVH_CPU(
         nz = std::min(std::max(nz, 0.0f), 1.0f);
 
         prims[i].morton = morton3D(nx, ny, nz);
+        morton_codes[i] = prims[i].morton;
     }
 
     // 3) Sort primitives by Morton code
@@ -248,7 +253,6 @@ inline unsigned int buildLBVH_CPU(
     outNodes.resize(numNodes);
     outLeafTriIndices.resize(N);
 
-    std::vector<uint32_t> sortedCodes(N);
     for (size_t i = 0; i < N; ++i) {
         sortedCodes[i] = prims[i].morton;
         outLeafTriIndices[i] = prims[i].triIndex;
