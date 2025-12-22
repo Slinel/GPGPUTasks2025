@@ -33,7 +33,8 @@ const ProgramBinaries& getMergeSortMorton();
 const ProgramBinaries& getSetupBVHTree();
 const ProgramBinaries& getCalculateAABBs();
 const ProgramBinaries& getDenoiser();
-
+const ProgramBinaries& getMinMaxReduction();
+const ProgramBinaries& getReduction();
 }
 
 namespace avk2 {

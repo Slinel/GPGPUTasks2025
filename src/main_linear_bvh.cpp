@@ -16,6 +16,7 @@
 #include "cpu_helpers/build_bvh_cpu.h"
 
 #include "debug/debug_bvh.h"
+#include "libimages/CImg.h"
 
 #include <filesystem>
 #include <fstream>
@@ -224,8 +225,11 @@ void run(int argc, char** argv)
             std::cout << "CPU build LBVH in " << cpu_lbvh_time << " sec" << std::endl;
             std::cout << "CPU LBVH build performance: " << build_mtris_per_sec << " MTris/s" << std::endl;
             std::cout << "CPU BVH depth: " << BVH_depth << std::endl; //Хотел прикинуть какая глубина стека нужна
-            std::cout << "CPU BVH bounds: "
-                << cMin.x <<' '<< cMin.y <<' '<< cMin.z <<' '<< cMax.x <<' '<< cMax.y <<' '<< cMax.z<< std::endl;
+            if (debug) {
+                std::cout<<"scene bounds computed by cpu: \n";
+                std::cout << cMin.x <<' '<< cMin.y <<' '<< cMin.z << std::endl;
+                std::cout << cMax.x <<' '<< cMax.y <<' '<< cMax.z << std::endl;
+            }
 
             gpu::shared_device_buffer_typed<BVHNodeGPU> lbvh_nodes_gpu(lbvh_nodes_cpu.size());
             gpu::gpu_mem_32u leaf_faces_indices_gpu(leaf_faces_indices_cpu.size());
@@ -293,20 +297,100 @@ void run(int argc, char** argv)
             gpu::gpu_mem_32u faces_indices_gpu1(nfaces);
             gpu::gpu_mem_32u faces_indices_gpu2(nfaces);
             gpu::gpu_mem_32u faces_parents(2*nfaces-1);
+            gpu::gpu_mem_32f min_reduction1(nfaces*3);
+            gpu::gpu_mem_32f max_reduction1(nfaces*3);
+            gpu::gpu_mem_32f min_reduction2(nfaces*3);
+            gpu::gpu_mem_32f max_reduction2(nfaces*3);
             gpu::shared_device_buffer_typed<BVHNodeGPU> lbvh_nodes(2*nfaces-1);
             gpu::shared_device_buffer_typed<MortonCode>* merge_code_from = &morton_codes_gpu1;
             gpu::gpu_mem_32u*                            merge_indx_from = &faces_indices_gpu1;
             gpu::shared_device_buffer_typed<MortonCode>* merge_code_to   = &morton_codes_gpu2;
             gpu::gpu_mem_32u*                            merge_indx_to   = &faces_indices_gpu2;
 
+            ocl::KernelSource ocl_minmax_reduction(ocl::getMinMaxReduction());
+            ocl::KernelSource ocl_reduction(ocl::getReduction());
             ocl::KernelSource ocl_build_morton(ocl::getBuildMorton());
             ocl::KernelSource ocl_merge_sort_morton(ocl::getMergeSortMorton());
             ocl::KernelSource ocl_setup_BVH_tree(ocl::getSetupBVHTree());
             ocl::KernelSource ocl_calculate_aabbs(ocl::getCalculateAABBs());
 
             std::vector<double> gpu_lbvh_times;
-            for (int iter = 0; iter < niters; ++iter) {
+            for (int iter = 0; iter < 1; ++iter) {
+            //for (int iter = 0; iter < niters; ++iter) {
                 timer t;
+                // 0 Этам
+                // Найти границы сцены (сначала переиспользовал значения с цпу, но передумал, щас свертку напишу)
+                ocl_minmax_reduction.exec(//это поиск центроидов, просто не переименовал
+                            gpu::WorkSize(32, nfaces),
+                            vertices_gpu,
+                            faces_gpu,
+                            min_reduction1,
+                            max_reduction1,
+                            nfaces);
+
+                if (debug) {
+                    std::vector<float> cMingpu2 = min_reduction1.readVector(nfaces*3);
+                    float min_x = 100000000.0;
+                    int counter = 0;
+                    for (int i = 0; i+0<(nfaces*3); i+=3) {
+                        if (cMingpu2[i+0] == -123.0) {counter+=1;}
+                        min_x = fmin(min_x, cMingpu2[i+0]);
+                    }std::cout<<"min_x_gpu: "<<min_x<<std::endl;
+                    std::cout<<"counter: "<<counter<<std::endl;
+                    float min_y = 100000000.0;
+                    for (int i = 0; i+1<(nfaces*3); i+=3) {
+                        min_y = fmin(min_y, cMingpu2[i+1]);
+                    }std::cout<<"min_y_gpu: "<<min_y<<std::endl;
+                    float min_z = 100000000.0;
+                    for (int i = 0; i+2<(nfaces*3); i+=3) {
+                        min_z = fmin(min_z, cMingpu2[i+2]);
+                    }std::cout<<"min_z_gpu: "<<min_z<<std::endl;
+                    std::vector<float> cMaxgpu2 = max_reduction1.readVector(nfaces);
+                }
+
+
+                gpu::gpu_mem_32f* min_from = &min_reduction1;
+                gpu::gpu_mem_32f* min_to   = &min_reduction2;
+
+                gpu::gpu_mem_32f* max_from = &max_reduction1;
+                gpu::gpu_mem_32f* max_to   = &max_reduction2;
+                unsigned int k = nfaces; //длинна в длинна в треугольниках
+                bool flag = true;
+                while (k>1) {
+
+                    ocl_reduction.exec(
+                            gpu::WorkSize(32, k),
+                            *min_from,
+                            *max_from,
+                            *min_to,
+                            *max_to,
+                            k);
+
+                    k = (k+31)/32;
+
+                    if (flag) {
+                        min_from = &min_reduction2;
+                        min_to   = &min_reduction1;
+
+                        max_from = &max_reduction2;
+                        max_to   = &max_reduction1;
+                    } else {
+                        min_from = &min_reduction1;
+                        min_to   = &min_reduction2;
+
+                        max_from = &max_reduction1;
+                        max_to   = &max_reduction2;
+                    }
+                    flag = !flag;
+                }
+                std::vector<float> cMingpu = min_from->readVector(3);
+                std::vector<float> cMaxgpu = max_from->readVector(3);
+                if (debug) {
+                    std::cout<<"scene bounds computed by gpu: \n";
+                    for (auto el : cMingpu) {std::cout<<el<<' ';}std::cout<<'\n';
+                    for (auto el : cMaxgpu) {std::cout<<el<<' ';}std::cout<<'\n';
+                }
+
                 // 1 Этап
                 // Для треугольников найти центроиды, построить для них коды мортона
                 // Сохранить эти коды в массив кодов мортона соответствующих массиву faces_gpu
@@ -317,10 +401,8 @@ void run(int argc, char** argv)
                         morton_codes_gpu1,
                         faces_indices_gpu1,
                         nfaces,
-                        cMin.x,cMin.y,cMin.z,
-                        cMax.x,cMax.y,cMax.z);
-                        // Тут переиспользую границы сцены от cpu, потому что даже в массовом параллелиме, их можно считать
-                        // что они предподсчитаны создателем сцены, писать свертку для поиска границ сцены я не буду
+                        cMingpu[0],cMingpu[1],cMingpu[2],
+                        cMaxgpu[0],cMaxgpu[1],cMaxgpu[2]);
 
 
                 if (debug) {
@@ -337,7 +419,7 @@ void run(int argc, char** argv)
                 merge_indx_from = &faces_indices_gpu1;
                 merge_code_to   = &morton_codes_gpu2;
                 merge_indx_to   = &faces_indices_gpu2;
-                unsigned int k = 1;
+                k = 1;
                 while (k < nfaces) {
                     ocl_merge_sort_morton.exec(
                         gpu::WorkSize(GROUP_SIZE, nfaces),

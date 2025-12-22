@@ -8,6 +8,8 @@
 #include "cl/generated_kernels/setup_BVH_tree.h"
 #include "cl/generated_kernels/calculate_aabbs.h"
 #include "cl/generated_kernels/denoise.h"
+#include "cl/generated_kernels/minmax_reduction.h"
+#include "cl/generated_kernels/reduction.h"
 
 #include "vk/generated_kernels/aplusb_comp.h"
 #include "vk/generated_kernels/ray_tracing_render_brute_force_comp.h"
@@ -69,6 +71,10 @@ const ProgramBinaries& getMergeSortMorton()
 {
     return opencl_binaries_merge_sort_morton;
 }
+const ProgramBinaries& getMinMaxReduction()
+{
+    return opencl_binaries_minmax_reduction;
+}
 const ProgramBinaries& getSetupBVHTree()
 {
     return opencl_binaries_setup_BVH_tree;
@@ -80,6 +86,10 @@ const ProgramBinaries& getCalculateAABBs()
 const ProgramBinaries& getDenoiser()
 {
     return opencl_binaries_denoise;
+}
+const ProgramBinaries& getReduction()
+{
+    return opencl_binaries_reduction;
 }
 
 } // namespace ocl
